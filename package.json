@@ -1,0 +1,46 @@
+{
+    "author": "NetNoise",
+    "dependencies": {},
+    "keywords": [
+        "pebble-watchface"
+    ],
+    "name": "alien-clock",
+    "pebble": {
+        "capabilities": [
+            "configurable"
+        ],
+        "displayName": "Alien Clock",
+        "enableMultiJS": true,
+        "messageKeys": [
+            "ShowSeconds",
+            "ShowLabels",
+            "BackgroundColor",
+            "SingleHoursMinutesColor",
+            "FiveXHoursMinutesColor",
+            "TenXMinutesColor",
+            "SecondsColor",
+            "LabelColor"
+        ],
+        "projectType": "native",
+        "resources": {
+            "media": [
+                {
+                    "file": "images/thumbnail.png",
+                    "menuIcon": true,
+                    "name": "IMAGE_MENU_ICON",
+                    "type": "png"
+                }
+            ]
+        },
+        "sdkVersion": "3",
+        "targetPlatforms": [
+            "emery",
+            "gabbro"
+        ],
+        "uuid": "2ecde17d-6cc3-430b-a6e9-4d0df5c5a2c2",
+        "watchapp": {
+            "watchface": true
+        }
+    },
+    "version": "1.0.0"
+}
