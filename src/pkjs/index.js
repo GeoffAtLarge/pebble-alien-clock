@@ -15,17 +15,6 @@ var DEFAULTS = {
   LabelColor:              'aaaaaa'
 };
 
-var MESSAGE_KEYS = {
-  ShowSeconds:             0,
-  ShowLabels:              1,
-  BackgroundColor:         2,
-  SingleHoursMinutesColor: 3,
-  FiveXHoursMinutesColor:  4,
-  TenXMinutesColor:        5,
-  SecondsColor:            6,
-  LabelColor:              7
-};
-
 function hexToInt(hex) {
   var val = parseInt((hex || '').replace('#', ''), 16);
   return isNaN(val) ? 0 : val;
@@ -149,7 +138,7 @@ Pebble.addEventListener('showConfiguration', function () {
   Pebble.openURL('data:text/html,' + encodeURIComponent(page));
 });
 
-Pebble.addEventListener('webviewClosed', function (e) {
+Pebble.addEventListener('webviewclosed', function (e) {
   console.log('webviewClosed event, response: ' + e.response);
 
   if (!e || !e.response || e.response === 'CANCELLED') {
@@ -157,15 +146,9 @@ Pebble.addEventListener('webviewClosed', function (e) {
     return;
   }
 
-  /* Parse the pebblejs://close#key=val&key2=val2 response */
-  var raw = e.response;
-  var hashIdx = raw.indexOf('#');
-  if (hashIdx === -1) {
-    console.log('No # found in response, treating as cancel');
-    return;
-  }
-
-  var fragment = raw.substring(hashIdx + 1);
+  /* e.response is already just the fragment content (key=val&key2=val2),
+     not the full pebblejs://close#... URL — the runtime strips the rest. */
+  var fragment = e.response;
   console.log('Fragment: ' + fragment);
 
   var settings = {};
@@ -186,20 +169,24 @@ Pebble.addEventListener('webviewClosed', function (e) {
     console.log('localStorage error: ' + err);
   }
 
-  /* Build message using hardcoded keys (don't rely on Message object) */
+  /* CloudPebble assigns message-key integer IDs alphabetically by key name,
+     not in package.json list order — hardcoded 0..7 indices silently land
+     in the wrong fields. Use the generated message_keys module instead, which
+     always matches the MESSAGE_KEY_* values compiled into the C header. */
+  var keys = require('message_keys');
   var msg = {};
 
   /* Booleans */
-  msg[0] = settings.ShowSeconds === 'true' ? 1 : 0;
-  msg[1] = settings.ShowLabels  === 'true' ? 1 : 0;
+  msg[keys.ShowSeconds] = settings.ShowSeconds === 'true' ? 1 : 0;
+  msg[keys.ShowLabels]  = settings.ShowLabels  === 'true' ? 1 : 0;
 
   /* Colors (hex string → int) */
-  msg[2] = hexToInt(settings.BackgroundColor);
-  msg[3] = hexToInt(settings.SingleHoursMinutesColor);
-  msg[4] = hexToInt(settings.FiveXHoursMinutesColor);
-  msg[5] = hexToInt(settings.TenXMinutesColor);
-  msg[6] = hexToInt(settings.SecondsColor);
-  msg[7] = hexToInt(settings.LabelColor);
+  msg[keys.BackgroundColor]         = hexToInt(settings.BackgroundColor);
+  msg[keys.SingleHoursMinutesColor] = hexToInt(settings.SingleHoursMinutesColor);
+  msg[keys.FiveXHoursMinutesColor]  = hexToInt(settings.FiveXHoursMinutesColor);
+  msg[keys.TenXMinutesColor]        = hexToInt(settings.TenXMinutesColor);
+  msg[keys.SecondsColor]            = hexToInt(settings.SecondsColor);
+  msg[keys.LabelColor]              = hexToInt(settings.LabelColor);
 
   console.log('Message to send: ' + JSON.stringify(msg));
 
