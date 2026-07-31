@@ -107,9 +107,6 @@ static void prv_fill_dot(GContext *ctx, int cx, int cy, int r,
                           GColor col, bool lit) {
   graphics_context_set_fill_color(ctx, lit ? col : GColorDarkGray);
   graphics_fill_circle(ctx, GPoint(cx, cy), r);
-  graphics_context_set_stroke_color(ctx, lit ? GColorWhite : GColorDarkGray);
-  graphics_context_set_stroke_width(ctx, 1);
-  graphics_draw_circle(ctx, GPoint(cx, cy), r);
 }
 
 static void prv_fill_rect_led(GContext *ctx, int cx, int cy, int hw, int hh,
@@ -117,9 +114,6 @@ static void prv_fill_rect_led(GContext *ctx, int cx, int cy, int hw, int hh,
   GRect r = GRect(cx - hw, cy - hh, hw * 2, hh * 2);
   graphics_context_set_fill_color(ctx, lit ? col : GColorDarkGray);
   graphics_fill_rect(ctx, r, 2, GCornersAll);
-  graphics_context_set_stroke_color(ctx, lit ? GColorWhite : GColorDarkGray);
-  graphics_context_set_stroke_width(ctx, 1);
-  graphics_draw_round_rect(ctx, r, 2);
 }
 
 static void prv_fill_rot_rect(GContext *ctx,
@@ -130,9 +124,6 @@ static void prv_fill_rot_rect(GContext *ctx,
   GPath *path = gpath_create(&info);
   graphics_context_set_fill_color(ctx, lit ? col : GColorDarkGray);
   gpath_draw_filled(ctx, path);
-  graphics_context_set_stroke_color(ctx, lit ? GColorWhite : GColorDarkGray);
-  graphics_context_set_stroke_width(ctx, 1);
-  gpath_draw_outline(ctx, path);
   gpath_destroy(path);
 }
 
@@ -156,8 +147,12 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   int sy_k = (H * 1000) / 168;
   int round_inset = PBL_IF_ROUND_ELSE((H * 80) / 1000, 0);
 
+  /* When seconds are hidden, the content (base y=12..118) leaves 62 base
+     units of empty space below. Shift down by 19 base units to centre it. */
+  int center_offset = s_settings.ShowSeconds ? 0 : 19;
+
   #define SX(v)  (((v) * sx_k) / 1000)
-  #define SY(v)  (round_inset + (((v) * sy_k) / 1000))
+  #define SY(v)  (round_inset + ((((v) + center_offset) * sy_k) / 1000))
 
   graphics_context_set_fill_color(ctx, s_settings.BackgroundColor);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
@@ -197,7 +192,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     prv_decompose(hour12, NULL, 0, rh, 2, gh, 4);
 
     int hy = SY(57);
-    int hw = SX(4);
+    int hw = SX(6);
     int hh = SY(9) - SY(0);
     if (hw < 1) hw = 1;
     if (hh < 1) hh = 1;
@@ -262,18 +257,20 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     {
       int bh = (SY(118) - SY(100)) / 2;
       if (bh < 1) bh = 1;
-      prv_fill_rect_led(ctx, SX(72), SY(109), SX(4), bh, cTenX, ym[4]);
+      prv_fill_rect_led(ctx, SX(72), SY(109), SX(6), bh, cTenX, ym[4]);
     }
   }
 
   /* ══════════════════════════════════════════════════════════
-   * DIVIDER
+   * DIVIDER — only shown when the seconds row is visible
    * ══════════════════════════════════════════════════════════ */
-  graphics_context_set_stroke_color(ctx, GColorDarkGray);
-  graphics_context_set_stroke_width(ctx, 1);
-  graphics_draw_line(ctx,
-    GPoint(SX(8),   SY(122)),
-    GPoint(SX(136), SY(122)));
+  if (s_settings.ShowSeconds) {
+    graphics_context_set_stroke_color(ctx, GColorDarkGray);
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_draw_line(ctx,
+      GPoint(SX(8),   SY(122)),
+      GPoint(SX(136), SY(122)));
+  }
 
   /* ══════════════════════════════════════════════════════════
    * SECONDS
