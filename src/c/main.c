@@ -118,13 +118,22 @@ static void prv_fill_rect_led(GContext *ctx, int cx, int cy, int hw, int hh,
 
 static void prv_fill_rot_rect(GContext *ctx,
                                GPoint p0, GPoint p1, GPoint p2, GPoint p3,
-                               GColor col, bool lit) {
+                               GColor col, bool lit, GColor bg_col) {
   GPoint pts[4] = {p0, p1, p2, p3};
   GPathInfo info = { .num_points = 4, .points = pts };
   GPath *path = gpath_create(&info);
   graphics_context_set_fill_color(ctx, lit ? col : GColorDarkGray);
   gpath_draw_filled(ctx, path);
   gpath_destroy(path);
+
+  /* GPath has no native corner-radius support, so round the corners to
+     match prv_fill_rect_led's 2px radius by punching a background-colored
+     notch at each vertex. */
+  graphics_context_set_fill_color(ctx, bg_col);
+  graphics_fill_circle(ctx, p0, 2);
+  graphics_fill_circle(ctx, p1, 2);
+  graphics_fill_circle(ctx, p2, 2);
+  graphics_fill_circle(ctx, p3, 2);
 }
 
 /* ── Decomposition ───────────────────────────────────────────── */
@@ -218,10 +227,16 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
 
   /* ══════════════════════════════════════════════════════════
    * MINUTES
-   * Upper-left  (34,27)(40,22)(52,35)(46,40)
-   * Upper-right (110,27)(104,22)(92,35)(98,40)  — exact mirror
-   * Lower-left  (40,98)(34,93)(46,80)(52,86)
-   * Lower-right (104,98)(110,93)(98,80)(92,86)  — exact mirror
+   * Upper-left  (32,28)(42,21)(54,34)(44,41)
+   * Upper-right (112,28)(102,21)(90,34)(100,41)  — exact mirror
+   * Lower-left  (42,99)(32,92)(44,79)(54,86)
+   * Lower-right (102,99)(112,92)(100,79)(90,86)  — exact mirror
+   *
+   * These are parallelograms: opposite sides are equal-length and
+   * parallel (short axis ~12 base units, matching the bottom overflow
+   * LED's width; long axis ~17.7 base units, unchanged from the
+   * original design). Widening only scales the short-axis vector, so
+   * the angle is preserved and the shape never skews.
    * ══════════════════════════════════════════════════════════ */
   {
     bool ym[5], rm[1], gm[4];
@@ -230,14 +245,14 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     prv_fill_dot(ctx, SX(72), SY(12), SX(4), cFiveX, rm[0]);
 
     prv_fill_rot_rect(ctx,
-      GPoint(SX(34), SY(27)), GPoint(SX(40), SY(22)),
-      GPoint(SX(52), SY(35)), GPoint(SX(46), SY(40)),
-      cTenX, ym[0]);
+      GPoint(SX(32), SY(28)), GPoint(SX(42), SY(21)),
+      GPoint(SX(54), SY(34)), GPoint(SX(44), SY(41)),
+      cTenX, ym[0], s_settings.BackgroundColor);
 
     prv_fill_rot_rect(ctx,
-      GPoint(SX(110), SY(27)), GPoint(SX(104), SY(22)),
-      GPoint(SX( 92), SY(35)), GPoint(SX( 98), SY(40)),
-      cTenX, ym[1]);
+      GPoint(SX(112), SY(28)), GPoint(SX(102), SY(21)),
+      GPoint(SX( 90), SY(34)), GPoint(SX(100), SY(41)),
+      cTenX, ym[1], s_settings.BackgroundColor);
 
     prv_fill_dot(ctx, SX(72), SY(37), SX(4), cSingle, gm[0]);
     prv_fill_dot(ctx, SX(72), SY(50), SX(4), cSingle, gm[1]);
@@ -245,14 +260,14 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     prv_fill_dot(ctx, SX(72), SY(76), SX(4), cSingle, gm[3]);
 
     prv_fill_rot_rect(ctx,
-      GPoint(SX(40), SY(98)), GPoint(SX(34), SY(93)),
-      GPoint(SX(46), SY(80)), GPoint(SX(52), SY(86)),
-      cTenX, ym[2]);
+      GPoint(SX(42), SY(99)), GPoint(SX(32), SY(92)),
+      GPoint(SX(44), SY(79)), GPoint(SX(54), SY(86)),
+      cTenX, ym[2], s_settings.BackgroundColor);
 
     prv_fill_rot_rect(ctx,
-      GPoint(SX(104), SY(98)), GPoint(SX(110), SY(93)),
-      GPoint(SX( 98), SY(80)), GPoint(SX( 92), SY(86)),
-      cTenX, ym[3]);
+      GPoint(SX(102), SY(99)), GPoint(SX(112), SY(92)),
+      GPoint(SX(100), SY(79)), GPoint(SX( 90), SY(86)),
+      cTenX, ym[3], s_settings.BackgroundColor);
 
     {
       int bh = (SY(118) - SY(100)) / 2;
