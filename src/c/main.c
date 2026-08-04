@@ -200,7 +200,10 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     bool rh[2], gh[4];
     prv_decompose(hour12, NULL, 0, rh, 2, gh, 4);
 
-    int hy = SY(57);
+    /* y=60 is the true vertical midpoint of the diagonal minute LED
+       groups (upper group spans base y 21-41, lower group spans 79-99),
+       centering the hour row between them. */
+    int hy = SY(60);
     int hw = SX(6);
     int hh = SY(9) - SY(0);
     if (hw < 1) hw = 1;
@@ -214,13 +217,17 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     prv_fill_rect_led(ctx, SX(126), hy, hw, hh, cSingle, gh[3]);  /* outer-right */
 
     if (s_settings.ShowLabels) {
+      /* Positioned directly under the hour rect's own bottom edge (rather
+         than a fixed base-y) so it can't drift back into the diagonal
+         minute LEDs (top edge at base y=79) if hy ever changes again. */
+      int label_y = hy + hh + 2;
       GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_09);
       graphics_context_set_text_color(ctx, cLabel);
       graphics_draw_text(ctx, "HOURS", f,
-        GRect(SX(8),  SY(78), SX(52), 12),
+        GRect(SX(8),  label_y, SX(52), 10),
         GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
       graphics_draw_text(ctx, "HOURS", f,
-        GRect(SX(84), SY(78), SX(52), 12),
+        GRect(SX(84), label_y, SX(52), 10),
         GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
     }
   }
@@ -242,7 +249,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     bool ym[5], rm[1], gm[4];
     prv_decompose(mins, ym, 5, rm, 1, gm, 4);
 
-    prv_fill_dot(ctx, SX(72), SY(12), SX(4), cFiveX, rm[0]);
+    prv_fill_dot(ctx, SX(72), SY(12), SX(6), cFiveX, rm[0]);
 
     prv_fill_rot_rect(ctx,
       GPoint(SX(32), SY(28)), GPoint(SX(42), SY(21)),
@@ -254,10 +261,12 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
       GPoint(SX( 90), SY(34)), GPoint(SX(100), SY(41)),
       cTenX, ym[1], s_settings.BackgroundColor);
 
-    prv_fill_dot(ctx, SX(72), SY(37), SX(4), cSingle, gm[0]);
-    prv_fill_dot(ctx, SX(72), SY(50), SX(4), cSingle, gm[1]);
-    prv_fill_dot(ctx, SX(72), SY(63), SX(4), cSingle, gm[2]);
-    prv_fill_dot(ctx, SX(72), SY(76), SX(4), cSingle, gm[3]);
+    /* Spacing widened from 13 to 16 base units so the larger SX(6)-radius
+       dots (diameter 12) don't crowd each other. */
+    prv_fill_dot(ctx, SX(72), SY(37), SX(6), cSingle, gm[0]);
+    prv_fill_dot(ctx, SX(72), SY(53), SX(6), cSingle, gm[1]);
+    prv_fill_dot(ctx, SX(72), SY(69), SX(6), cSingle, gm[2]);
+    prv_fill_dot(ctx, SX(72), SY(85), SX(6), cSingle, gm[3]);
 
     prv_fill_rot_rect(ctx,
       GPoint(SX(42), SY(99)), GPoint(SX(32), SY(92)),
@@ -296,7 +305,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     static const char *SEC_LBL[6] = {"32","16","8","4", "2", "1"};
 
     int scy = SY(134);
-    int sr  = SX(4);
+    int sr  = SX(6);
     if (sr < 1) sr = 1;
 
     for (int i = 0; i < 6; i++) {
