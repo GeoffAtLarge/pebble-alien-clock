@@ -39,11 +39,15 @@
  *
  * MINUTES — centre column + rotated-rect corner LEDs
  *   1  ×5  circle    top-centre                  = 5
- *   4  ×10 rotated-rect corner LEDs              = 10 each
+ *   4  ×10 rotated-rect corner LEDs (true rotation of a rect the same
+ *          shape as an hour LED, via prv_fill_rotated_rect_led)  = 10 each
  *   4  ×1  circles, vertical column              = 1 each
  *   1  ×10 upright-rect LED, bottom-centre       = 10  (→ max 59)
  *
  * SECONDS — 6 binary dots: 32 16 8 4 2 1
+ *   emery  : straight row above a divider line
+ *   gabbro : arced along the bottom of the bezel (no divider, no
+ *            "SECONDS" caption — both would get clipped by the mask)
  *
  * SETTINGS (PebbleKit JS AppMessage):
  *   ShowSeconds              — toggle seconds row
@@ -103,17 +107,33 @@ static struct tm s_now;
 
 /* ── Drawing helpers ─────────────────────────────────────────── */
 
+/* Inactive LEDs are drawn as a plain 1px gray outline (nothing filled)
+   rather than a filled dark-gray shape, so they read clearly as "off"
+   against the filled, colored "on" LEDs instead of both looking like solid
+   blobs that differ only in color. */
 static void prv_fill_dot(GContext *ctx, int cx, int cy, int r,
                           GColor col, bool lit) {
-  graphics_context_set_fill_color(ctx, lit ? col : GColorDarkGray);
-  graphics_fill_circle(ctx, GPoint(cx, cy), r);
+  if (lit) {
+    graphics_context_set_fill_color(ctx, col);
+    graphics_fill_circle(ctx, GPoint(cx, cy), r);
+  } else {
+    graphics_context_set_stroke_color(ctx, GColorDarkGray);
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_draw_circle(ctx, GPoint(cx, cy), r);
+  }
 }
 
 static void prv_fill_rect_led(GContext *ctx, int cx, int cy, int hw, int hh,
                                GColor col, bool lit) {
   GRect r = GRect(cx - hw, cy - hh, hw * 2, hh * 2);
-  graphics_context_set_fill_color(ctx, lit ? col : GColorDarkGray);
-  graphics_fill_rect(ctx, r, 2, GCornersAll);
+  if (lit) {
+    graphics_context_set_fill_color(ctx, col);
+    graphics_fill_rect(ctx, r, 2, GCornersAll);
+  } else {
+    graphics_context_set_stroke_color(ctx, GColorDarkGray);
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_draw_round_rect(ctx, r, 2);
+  }
 }
 
 static void prv_fill_rot_rect(GContext *ctx,
@@ -122,18 +142,50 @@ static void prv_fill_rot_rect(GContext *ctx,
   GPoint pts[4] = {p0, p1, p2, p3};
   GPathInfo info = { .num_points = 4, .points = pts };
   GPath *path = gpath_create(&info);
-  graphics_context_set_fill_color(ctx, lit ? col : GColorDarkGray);
-  gpath_draw_filled(ctx, path);
-  gpath_destroy(path);
 
-  /* GPath has no native corner-radius support, so round the corners to
-     match prv_fill_rect_led's 2px radius by punching a background-colored
-     notch at each vertex. */
-  graphics_context_set_fill_color(ctx, bg_col);
-  graphics_fill_circle(ctx, p0, 2);
-  graphics_fill_circle(ctx, p1, 2);
-  graphics_fill_circle(ctx, p2, 2);
-  graphics_fill_circle(ctx, p3, 2);
+  if (lit) {
+    graphics_context_set_fill_color(ctx, col);
+    gpath_draw_filled(ctx, path);
+
+    /* GPath has no native corner-radius support, so round the corners to
+       match prv_fill_rect_led's 2px radius by punching a background-colored
+       notch at each vertex. */
+    graphics_context_set_fill_color(ctx, bg_col);
+    graphics_fill_circle(ctx, p0, 2);
+    graphics_fill_circle(ctx, p1, 2);
+    graphics_fill_circle(ctx, p2, 2);
+    graphics_fill_circle(ctx, p3, 2);
+  } else {
+    graphics_context_set_stroke_color(ctx, GColorDarkGray);
+    graphics_context_set_stroke_width(ctx, 1);
+    gpath_draw_outline(ctx, path);
+  }
+
+  gpath_destroy(path);
+}
+
+/* Builds the exact same rectangle shape as prv_fill_rect_led (half-extents
+   hw/hh around a center point) and rotates it by angle_deg around that
+   center before filling. Unlike four hand-picked corner points, a true
+   rotation always keeps opposite sides parallel and corners at 90°, so the
+   result can never look skewed the way the old hand-placed quads did. */
+static void prv_fill_rotated_rect_led(GContext *ctx, int cx, int cy,
+                                       int hw, int hh, int angle_deg,
+                                       GColor col, bool lit, GColor bg_col) {
+  int32_t angle = (angle_deg * TRIG_MAX_ANGLE) / 360;
+  int32_t s = sin_lookup(angle);
+  int32_t c = cos_lookup(angle);
+
+  GPoint local[4] = { { -hw, -hh }, { hw, -hh }, { hw, hh }, { -hw, hh } };
+  GPoint pts[4];
+  for (int i = 0; i < 4; i++) {
+    int dx = local[i].x, dy = local[i].y;
+    int rx = (dx * c - dy * s) / TRIG_MAX_RATIO;
+    int ry = (dx * s + dy * c) / TRIG_MAX_RATIO;
+    pts[i] = GPoint(cx + rx, cy + ry);
+  }
+
+  prv_fill_rot_rect(ctx, pts[0], pts[1], pts[2], pts[3], col, lit, bg_col);
 }
 
 /* ── Decomposition ───────────────────────────────────────────── */
@@ -234,32 +286,54 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
 
   /* ══════════════════════════════════════════════════════════
    * MINUTES
-   * Upper-left  (32,28)(42,21)(54,34)(44,41)
-   * Upper-right (112,28)(102,21)(90,34)(100,41)  — exact mirror
-   * Lower-left  (42,99)(32,92)(44,79)(54,86)
-   * Lower-right (102,99)(112,92)(100,79)(90,86)  — exact mirror
    *
-   * These are parallelograms: opposite sides are equal-length and
-   * parallel (short axis ~12 base units, matching the bottom overflow
-   * LED's width; long axis ~17.7 base units, unchanged from the
-   * original design). Widening only scales the short-axis vector, so
-   * the angle is preserved and the shape never skews.
+   * The ×10 corner LEDs are built exactly like the hour LEDs — an
+   * axis-aligned rounded rect with half-extents (mw, mh) — then rotated
+   * about its own center with prv_fill_rotated_rect_led(). A true
+   * rotation keeps opposite sides parallel and corners at 90°, so unlike
+   * the old hand-placed quad points, the shape can never look skewed.
+   *
+   * Centers sit on the diagonals toward each screen corner (mirrored
+   * left/right and top/bottom); the tilt angle mirrors the same way so
+   * the four LEDs fan out symmetrically.
+   *
+   * Tens-of-minutes LED pattern (matches the real Alien Clock's
+   * "balance left/right whenever possible" behavior). This isn't
+   * cumulative — the centre LED is lit at 30 but off again at 40 — so
+   * it's a direct lookup by tens digit rather than prv_decompose():
+   *   10 → upper-left only
+   *   20 → upper-left + upper-right      (balanced L/R pair)
+   *   30 → pair + bottom-centre          (pair + neutral centre)
+   *   40 → all four corners, centre off  (balanced L/R, no centre)
+   *   50 → everything lit
    * ══════════════════════════════════════════════════════════ */
   {
-    bool ym[5], rm[1], gm[4];
-    prv_decompose(mins, ym, 5, rm, 1, gm, 4);
+    static const bool TEN_LIT[6][5] = {
+      /*        UL     UR     centre LL     LR   */
+      /*  0 */ { false, false, false, false, false },
+      /* 10 */ { true,  false, false, false, false },
+      /* 20 */ { true,  true,  false, false, false },
+      /* 30 */ { true,  true,  true,  false, false },
+      /* 40 */ { true,  true,  false, true,  true  },
+      /* 50 */ { true,  true,  true,  true,  true  },
+    };
+    const bool *ym = TEN_LIT[mins / 10];
+    bool rm[1], gm[4];
+    prv_decompose(mins % 10, NULL, 0, rm, 1, gm, 4);
 
     prv_fill_dot(ctx, SX(72), SY(12), SX(6), cFiveX, rm[0]);
 
-    prv_fill_rot_rect(ctx,
-      GPoint(SX(32), SY(28)), GPoint(SX(42), SY(21)),
-      GPoint(SX(54), SY(34)), GPoint(SX(44), SY(41)),
-      cTenX, ym[0], s_settings.BackgroundColor);
+    int mw = SX(6);
+    int mh = SY(9) - SY(0);
+    if (mw < 1) mw = 1;
+    if (mh < 1) mh = 1;
+    const int TILT = 45; /* degrees */
 
-    prv_fill_rot_rect(ctx,
-      GPoint(SX(112), SY(28)), GPoint(SX(102), SY(21)),
-      GPoint(SX( 90), SY(34)), GPoint(SX(100), SY(41)),
-      cTenX, ym[1], s_settings.BackgroundColor);
+    prv_fill_rotated_rect_led(ctx, SX(43), SY(31), mw, mh, -TILT,
+      cTenX, ym[0], s_settings.BackgroundColor);   /* upper-left  */
+
+    prv_fill_rotated_rect_led(ctx, SX(101), SY(31), mw, mh, TILT,
+      cTenX, ym[1], s_settings.BackgroundColor);   /* upper-right */
 
     /* Spacing widened from 13 to 16 base units so the larger SX(6)-radius
        dots (diameter 12) don't crowd each other. */
@@ -268,26 +342,41 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     prv_fill_dot(ctx, SX(72), SY(69), SX(6), cSingle, gm[2]);
     prv_fill_dot(ctx, SX(72), SY(85), SX(6), cSingle, gm[3]);
 
-    prv_fill_rot_rect(ctx,
-      GPoint(SX(42), SY(99)), GPoint(SX(32), SY(92)),
-      GPoint(SX(44), SY(79)), GPoint(SX(54), SY(86)),
-      cTenX, ym[2], s_settings.BackgroundColor);
+    if (s_settings.ShowLabels) {
+      /* No room to run "MINUTES" horizontally here, and Pebble's text
+         API can't rotate glyphs — so stack the letters of "MIN" on
+         separate lines instead, reading top-to-bottom in the gap
+         between the single-LED column and the right-hand ×10 LED. */
+      static const char *MIN_LETTERS[3] = { "M", "I", "N" };
+      GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_09);
+      graphics_context_set_text_color(ctx, cLabel);
+      for (int i = 0; i < 3; i++) {
+        graphics_draw_text(ctx, MIN_LETTERS[i], f,
+          GRect(SX(84) - 7, SY(51 + i * 9), 14, 10),
+          GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+      }
+    }
 
-    prv_fill_rot_rect(ctx,
-      GPoint(SX(102), SY(99)), GPoint(SX(112), SY(92)),
-      GPoint(SX(100), SY(79)), GPoint(SX( 90), SY(86)),
-      cTenX, ym[3], s_settings.BackgroundColor);
+    prv_fill_rotated_rect_led(ctx, SX(43), SY(89), mw, mh, TILT,
+      cTenX, ym[3], s_settings.BackgroundColor);   /* lower-left  */
+
+    prv_fill_rotated_rect_led(ctx, SX(101), SY(89), mw, mh, -TILT,
+      cTenX, ym[4], s_settings.BackgroundColor);   /* lower-right */
 
     {
       int bh = (SY(118) - SY(100)) / 2;
       if (bh < 1) bh = 1;
-      prv_fill_rect_led(ctx, SX(72), SY(109), SX(6), bh, cTenX, ym[4]);
+      prv_fill_rect_led(ctx, SX(72), SY(109), SX(6), bh, cTenX, ym[2]);
     }
   }
 
   /* ══════════════════════════════════════════════════════════
-   * DIVIDER — only shown when the seconds row is visible
+   * DIVIDER — only on the rectangular build. On gabbro the seconds
+   * row is laid out along the bezel's own curve (see below), so a
+   * straight line has nothing horizontal to divide and would just
+   * get clipped by the circular mask near the bottom.
    * ══════════════════════════════════════════════════════════ */
+#if !defined(PBL_ROUND)
   if (s_settings.ShowSeconds) {
     graphics_context_set_stroke_color(ctx, GColorDarkGray);
     graphics_context_set_stroke_width(ctx, 1);
@@ -295,11 +384,54 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
       GPoint(SX(8),   SY(122)),
       GPoint(SX(136), SY(122)));
   }
+#endif
 
   /* ══════════════════════════════════════════════════════════
    * SECONDS
    * ══════════════════════════════════════════════════════════ */
   if (s_settings.ShowSeconds) {
+#if defined(PBL_ROUND)
+    /* The rectangular grid (base x 22..122) runs past the bezel near
+       the bottom of a round screen, clipping the outer dots. Instead,
+       walk the 6 dots along an arc concentric with the bezel itself —
+       every dot then sits the same safe distance from the edge,
+       regardless of how far it is from centre. gabbro is square
+       (W == H), so a single radius works in both axes with no
+       distortion. */
+    static const int   SEC_BV[6]  = {32, 16,  8,  4,  2,  1};
+    static const char *SEC_LBL[6] = {"32","16","8","4","2","1"};
+
+    int ccx = W / 2;
+    int ccy = H / 2;
+    int bezel_r = (W < H ? W : H) / 2;
+    int sr = SX(6);
+    if (sr < 1) sr = 1;
+    int radius = bezel_r - sr - 8;  /* keep dots clear of the bezel */
+
+    /* Sweep across a 110° arc centred on straight-down (Pebble trig
+       angle: 0 = 12 o'clock, clockwise; TRIG_MAX_ANGLE/2 = 6 o'clock). */
+    int32_t arc_span  = (TRIG_MAX_ANGLE * 110) / 360;
+    int32_t arc_start = (TRIG_MAX_ANGLE / 2) - (arc_span / 2);
+
+    GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_09);
+    if (s_settings.ShowLabels) graphics_context_set_text_color(ctx, cLabel);
+
+    for (int i = 0; i < 6; i++) {
+      int32_t angle = arc_start + (arc_span * i) / 5;
+      int dot_x = ccx + (radius * sin_lookup(angle)) / TRIG_MAX_RATIO;
+      int dot_y = ccy - (radius * cos_lookup(angle)) / TRIG_MAX_RATIO;
+
+      prv_fill_dot(ctx, dot_x, dot_y, sr, cSecs, !!(secs & SEC_BV[i]));
+
+      if (s_settings.ShowLabels) {
+        /* Label sits toward centre (above the dot), never further out
+           toward the bezel, so it can't get clipped either. */
+        graphics_draw_text(ctx, SEC_LBL[i], f,
+          GRect(dot_x - 8, dot_y - sr - 12, 16, 10),
+          GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+      }
+    }
+#else
     static const int   SEC_BX[6]  = {22, 42,  62, 82, 102, 122};
     static const int   SEC_BV[6]  = {32, 16,   8,  4,   2,   1};
     static const char *SEC_LBL[6] = {"32","16","8","4", "2", "1"};
@@ -325,6 +457,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
         GRect(0, SY(155), W, 10),
         GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
     }
+#endif
   }
 
   #undef SX
